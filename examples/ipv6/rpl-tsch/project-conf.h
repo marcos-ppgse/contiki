@@ -138,8 +138,10 @@
 #define GUARD_BEACON_TIME US_TO_RTIMERTICKS(TSCH_DEFAULT_TS_RX_WAIT*3/8)
 #define GUARD_BEACON_FRAME (0x57)
 
+#define TSCH_HOPPING_SEQUENCE_1_1_26 (uint8_t[]){ 26 }
+
 #undef TSCH_CONF_DEFAULT_HOPPING_SEQUENCE
-#define TSCH_CONF_DEFAULT_HOPPING_SEQUENCE TSCH_HOPPING_SEQUENCE_1_1
+#define TSCH_CONF_DEFAULT_HOPPING_SEQUENCE TSCH_HOPPING_SEQUENCE_1_1_26
 
 #undef TSCH_CONF_ASSOCIATION_POLL_FREQUENCY
 #define TSCH_CONF_ASSOCIATION_POLL_FREQUENCY 500 //aqui você pode definir quantas vezes por segundo o rádio vai escanear cada canal, o padrão é 100. Este parâmetro provavelmente poderá ser otimizado de forma a minimizar o tempo de associação (Rendezvous)
