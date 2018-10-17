@@ -315,7 +315,7 @@ eb_input(struct input_packet *current_input)
       /* Check for ASN drift */
       int32_t asn_diff = TSCH_ASN_DIFF(current_input->rx_asn, eb_ies.ie_asn);
       //if(asn_diff != 0) {
-      if(asn_diff >14) {   /*Habilitado para enviar mais EB's*/
+      if(asn_diff > 21) {   /*Habilitado para enviar mais EB's*/
         /* We disagree with our time source's ASN -- leave the network */
         PRINTF("TSCH:! ASN drifted by %ld, leaving the network\n", asn_diff);
         tsch_disassociate();

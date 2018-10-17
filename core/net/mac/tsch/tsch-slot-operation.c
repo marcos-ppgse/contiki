@@ -579,7 +579,7 @@ PT_THREAD(tsch_tx_slot(struct pt *pt, struct rtimer *t))
                     }
                     else
                     {
-                        if(packet_len <= 1) //se for um GB envia 3x
+                        if(packet_len <= 1 && tsch_is_coordinator) //se for um GB envia 3x
                         {
                             static rtimer_clock_t now,before;
                             /* delay before TX */
@@ -616,15 +616,14 @@ PT_THREAD(tsch_tx_slot(struct pt *pt, struct rtimer *t))
                             //TSCH_SCHEDULE_AND_YIELD(pt, t, current_slot_start, tsch_timing[tsch_ts_tx_offset] - RADIO_DELAY_BEFORE_TX+(now-before), "TxBeforeTx");
                             TSCH_SCHEDULE_AND_YIELD(pt, t, current_slot_start, tsch_timing[tsch_ts_tx_offset] - RADIO_DELAY_BEFORE_TX, "TxBeforeTx");
                             if(NETSTACK_RADIO.prepare(packet, packet_len) == 0)
-
                             {
                                 before = RTIMER_NOW();
                                 mac_tx_status = NETSTACK_RADIO.transmit(packet_len);
                                 now = RTIMER_NOW();
                                 //PRINTF("Tempo dormindo 2: now %d bef %d\n",(int)(now), (int)(before));
-                                /*TSCH_LOG_ADD(tsch_log_message,
-                                             snprintf(log->message, sizeof(log->message),
-                                                      "TB 2 now %d bef %d", (int)now, (int)before));*/
+                                //TSCH_LOG_ADD(tsch_log_message,
+                                //             snprintf(log->message, sizeof(log->message),
+                                //                      "TB 2 now %d bef %d", (int)now, (int)before));
                             }
                             packet = queuebuf_dataptr(current_packet->qb);
                             packet_len = queuebuf_datalen(current_packet->qb);
@@ -642,9 +641,9 @@ PT_THREAD(tsch_tx_slot(struct pt *pt, struct rtimer *t))
                                 mac_tx_status = NETSTACK_RADIO.transmit(packet_len);
                                 now = RTIMER_NOW();
                                 //PRINTF("Tempo dormindo 3: now %d bef %d\n",(int)(now), (int)(before));
-                                /*TSCH_LOG_ADD(tsch_log_message,
-                                             snprintf(log->message, sizeof(log->message),
-                                                      "TB 3 now %d bef %d", (int)now, (int)before));*/
+                                //TSCH_LOG_ADD(tsch_log_message,
+                                //             snprintf(log->message, sizeof(log->message),
+                                //                      "TB 3 now %d bef %d", (int)now, (int)before));
                             }
 
                         }
@@ -653,7 +652,19 @@ PT_THREAD(tsch_tx_slot(struct pt *pt, struct rtimer *t))
                             /* delay before TX */
                             TSCH_SCHEDULE_AND_YIELD(pt, t, current_slot_start, tsch_timing[tsch_ts_tx_offset] - RADIO_DELAY_BEFORE_TX, "TxBeforeTx");
                             TSCH_DEBUG_TX_EVENT();
-                            mac_tx_status = NETSTACK_RADIO.transmit(packet_len);
+                            if(packet_len<=1)
+                            {
+                                packet = queuebuf_dataptr(current_packet->qb);
+                                packet_len = queuebuf_datalen(current_packet->qb);
+                                packet_len++;
+                                beacon_id = 0x11;
+                                uint8_t *pointer = (uint8_t *)packet;
+                                pointer[packet_len-1] = beacon_id;
+                            }
+                            if(NETSTACK_RADIO.prepare(packet, packet_len) == 0)
+                            {
+                                mac_tx_status = NETSTACK_RADIO.transmit(packet_len);
+                            }
                         }
                     }
 
@@ -858,6 +869,10 @@ PT_THREAD(tsch_rx_slot(struct pt *pt, struct rtimer *t))
 
         current_input = &input_array[input_index];
 
+        while(NETSTACK_RADIO.pending_packet())
+        {
+            NETSTACK_RADIO.read((void *)current_input->payload, TSCH_PACKET_MAX_LEN);
+        }
         /* Wait before starting to listen */
         TSCH_SCHEDULE_AND_YIELD(pt, t, current_slot_start, tsch_timing[tsch_ts_rx_offset] - RADIO_DELAY_BEFORE_RX, "RxBeforeListen");
         TSCH_DEBUG(TS_RX_OFFSET);
@@ -869,6 +884,7 @@ PT_THREAD(tsch_rx_slot(struct pt *pt, struct rtimer *t))
             /* Check if receiving within guard time */
             BUSYWAIT_UNTIL_ABS((packet_seen = NETSTACK_RADIO.receiving_packet()),
                                current_slot_start, tsch_timing[tsch_ts_rx_offset] + tsch_timing[tsch_ts_rx_wait] + RADIO_DELAY_BEFORE_DETECT);
+            packet_seen = NETSTACK_RADIO.receiving_packet() || NETSTACK_RADIO.pending_packet();
         }
         if(!packet_seen) {
             /* no packets on air */
@@ -916,22 +932,29 @@ PT_THREAD(tsch_rx_slot(struct pt *pt, struct rtimer *t))
                     //printf("Eh guard beacon: %d\n", is_gb);
                     //printf("Numero do beacon: %.2X\n", *(current_input->payload+current_input->len-1));
                     current_input->len -= 1;
+                    frame.fcf.ack_required = 0;
                 }
-#endif  /*Inserido Marcos 03/09*/
 
-                uint8_t ret = frame802154_parse(current_input->payload, current_input->len, &frame);
-                is_eb = ret
-                        && frame.fcf.frame_version == FRAME802154_IEEE802154E_2012
-                        && frame.fcf.frame_type == FRAME802154_BEACONFRAME;
+#endif  /*Inserido Marcos 03/09*/
+                if(!is_gb)
+                {
+                    uint8_t ret = frame802154_parse(current_input->payload, current_input->len, &frame);
+                    is_eb = ret
+                            && frame.fcf.frame_version == FRAME802154_IEEE802154E_2012
+                            && frame.fcf.frame_type == FRAME802154_BEACONFRAME;
+                }
 
                 NETSTACK_RADIO.get_value(RADIO_PARAM_LAST_RSSI, &radio_last_rssi);
                 current_input->rx_asn = tsch_current_asn;
                 current_input->rssi = (signed)radio_last_rssi;
                 current_input->channel = current_channel;
-                header_len = frame802154_parse((uint8_t *)current_input->payload, current_input->len, &frame);
-                frame_valid = header_len > 0 &&
-                        frame802154_check_dest_panid(&frame) &&
-                        frame802154_extract_linkaddr(&frame, &source_address, &destination_address);
+                if(!is_gb)
+                {
+                    header_len = frame802154_parse((uint8_t *)current_input->payload, current_input->len, &frame);
+                    frame_valid = header_len > 0 &&
+                            frame802154_check_dest_panid(&frame) &&
+                            frame802154_extract_linkaddr(&frame, &source_address, &destination_address);
+                }
 
                 if(is_eb)
                 {
@@ -1021,10 +1044,10 @@ PT_THREAD(tsch_rx_slot(struct pt *pt, struct rtimer *t))
                             }
                         }
 
-                        uint8_t ret = frame802154_parse(current_input->payload, current_input->len, &frame);
+                        /*uint8_t ret = frame802154_parse(current_input->payload, current_input->len, &frame);
                         is_eb = ret
                                 && frame.fcf.frame_version == FRAME802154_IEEE802154E_2012
-                                && frame.fcf.frame_type == FRAME802154_BEACONFRAME;
+                                && frame.fcf.frame_type == FRAME802154_BEACONFRAME;*/
 
 #if !GUARD_BEACON /*Inserido Marcos 03/09*/
                         n = tsch_queue_get_nbr(&source_address);
@@ -1045,7 +1068,7 @@ PT_THREAD(tsch_rx_slot(struct pt *pt, struct rtimer *t))
                         }
 
 #else
-                        if(is_gb)
+                        if(is_gb && !tsch_is_coordinator)
                         {
                             uint8_t beaconOrder = *(current_input->payload+current_input->len);
                             if(beaconOrder==0x11)
